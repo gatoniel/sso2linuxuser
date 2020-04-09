@@ -201,10 +201,7 @@ def prepare_tornado_request(request):
     }
     return result
 
-
-
-
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             description="""sso2linuxuser: create linux user after SSO"""
@@ -235,7 +232,6 @@ if __name__ == "__main__":
             )
     
     args = parser.parse_args()    
-    
     port = args.port
     debug = args.debug
     
@@ -260,3 +256,6 @@ if __name__ == "__main__":
     http_server.listen(port)
     logger.info("Listening on port %i", port)
     tornado.ioloop.IOLoop.instance().start()
+    
+if __name__ == "__main__":
+    main()

@@ -224,7 +224,7 @@ def main():
             default=32
             )
     parser.add_argument(
-            "--debug", help="base", type=bool, action="store_true"
+            "--debug", help="base", action="store_true"
             )
     parser.add_argument(
             "--syslog_address", type=str,
@@ -235,17 +235,19 @@ def main():
     port = args.port
     debug = args.debug
     
+    loglevel = logging.DEBUG if debug else logging.INFO
     logger = logging.getLogger('sso2linuxuser')
-    logger.setLevel(logging.DEBUG if debug else logging.INFO)
+    logger.setLevel(loglevel)
     h = SysLogHandler(address=args.syslog_address, facility="daemon")
     formatter = logging.Formatter(
             '[%(name)s-%(levelname)s %(lineno)d] %(message)s'
             )
     h.setFormatter(formatter)
+    h.setLevel(loglevel)
     logger.addHandler(h)
     
     # create cookie secret
-    cookie_secret = secrets.token_hey(args.secret_nbytes)
+    cookie_secret = secrets.token_hex(args.secret_nbytes)
     
     app = Application(
             cookie_secret=cookie_secret, saml_path=args.saml_path,

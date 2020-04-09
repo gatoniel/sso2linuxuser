@@ -43,5 +43,5 @@ setuptools.setup(
     },
     platforms="Linux",
     python_requires='>=3.5',
-    install_required=install_requires,
+    install_requires=install_requires,
 )

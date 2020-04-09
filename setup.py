@@ -13,6 +13,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/gatoniel/sso2linuxuser",
     packages=setuptools.find_packages(),
+    package_data={'': ["*.html"]},
     license="BSD",
     classifiers=[
         'Intended Audience :: Developers',

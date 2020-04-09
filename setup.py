@@ -3,6 +3,14 @@ import setuptools
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+install_requires = []
+with open('requirements.txt') as f:
+    for line in f.readlines():
+        req = line.strip()
+        if not req or req.startswith('#') or '://' in req:
+            continue
+        install_requires.append(req)
+
 setuptools.setup(
     name="sso2linuxuser", # Replace with your own username
     version="0.0.2-dev",
@@ -13,7 +21,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/gatoniel/sso2linuxuser",
     packages=setuptools.find_packages(),
-    package_data={'': ["*.html"]},
+    include_package_data=True,
     license="BSD",
     classifiers=[
         'Intended Audience :: Developers',
@@ -35,4 +43,5 @@ setuptools.setup(
     },
     platforms="Linux",
     python_requires='>=3.5',
+    install_required=install_requires,
 )

@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="sso2linuxuser", # Replace with your own username
-    version="0.0.1-dev",
+    version="0.0.2-dev",
     author="Niklas Netter",
     author_email="niknett@gmail.com",
     description="Use SSO to create a linux user on server",
@@ -29,7 +29,7 @@ setuptools.setup(
     },
     entry_points={
         'console_scripts': [
-            'sso2linuxuser = sso2linuxuser.server:main',
+            'sso2linuxuser = sso2linuxuser.service:main',
         ],
     },
     platforms="Linux",

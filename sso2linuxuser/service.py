@@ -23,7 +23,8 @@ session = {}
 
 class Application(tornado.web.Application):
     def __init__(
-            self, cookie_secret, saml_path, logger, debug=False, base_url="/"
+            self, cookie_secret, saml_path, logger, debug=False, base_url="/",
+            https_reverse_proxy=True
             ):
         BASE_DIR = os.path.dirname(__file__)
         TEMPLATE_PATH = os.path.join(BASE_DIR, 'templates')
@@ -31,6 +32,7 @@ class Application(tornado.web.Application):
         
         config = {
                 "logger": logger, "saml_path": saml_path,
+                "https_reverse_proxy": https_reverse_proxy
                 }
         
         handlers_tmp = [
@@ -55,12 +57,27 @@ class Application(tornado.web.Application):
         logger.info("created Application")
 
 class BaseHandler(tornado.web.RequestHandler):
-    def initialize(self, logger, saml_path):
+    def initialize(self, logger, saml_path, https_reverse_proxy):
         self.log = logger
         self.saml_path = saml_path
+        self.https_reverse_proxy = https_reverse_proxy
         
     def prepare(self):
-        self.saml_req = prepare_tornado_request(self.request)
+        request = self.request
+        dataDict = {}
+        for key in request.arguments:
+            dataDict[key] = request.arguments[key][0].decode('utf-8')
+
+        https = request == 'https' or self.https_reverse_proxy
+        self.saml_req = {
+            'https': 'on' if https else 'off',
+            'http_host': tornado.httputil.split_host_and_port(request.host)[0],
+            'script_name': request.path,
+            'server_port': tornado.httputil.split_host_and_port(request.host)[1],
+            'get_data': dataDict,
+            'post_data': dataDict,
+            'query_string': request.query
+        }
         
     def get_current_user(self):
         pass
@@ -218,23 +235,6 @@ class MetadataHandler(BaseHandler):
             self.write(', '.join(errors))
         # return resp
 
-
-def prepare_tornado_request(request):
-    dataDict = {}
-    for key in request.arguments:
-        dataDict[key] = request.arguments[key][0].decode('utf-8')
-
-    result = {
-        'https': 'on' if request == 'https' else 'off',
-        'http_host': tornado.httputil.split_host_and_port(request.host)[0],
-        'script_name': request.path,
-        'server_port': tornado.httputil.split_host_and_port(request.host)[1],
-        'get_data': dataDict,
-        'post_data': dataDict,
-        'query_string': request.query
-    }
-    return result
-
 def main():
     parser = argparse.ArgumentParser(
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -259,6 +259,9 @@ def main():
             )
     parser.add_argument(
             "--debug", help="base", action="store_true"
+            )
+    parser.add_argument(
+            "--https_reverse_proxy", help="base", action="store_true"
             )
     parser.add_argument(
             "--syslog_address", type=str,
@@ -286,7 +289,8 @@ def main():
     app = Application(
             cookie_secret=cookie_secret, saml_path=args.saml_path,
             logger=logger, debug=debug,
-            base_url=args.base_url
+            base_url=args.base_url,
+            https_reverse_proxy=args.https_reverse_proxy
             )
     http_server = tornado.httpserver.HTTPServer(app)
     http_server.listen(port)

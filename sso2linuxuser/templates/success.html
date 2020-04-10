@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>You registered successfull</h2>
+
+<p>The user {{ current_user }} was registered with the given password. Now go to JupyterHub!</p>
+
+<a href="{{ remote_login }}" class="btn btn-info">Login JupyterHub</a>
+
+{% end %}

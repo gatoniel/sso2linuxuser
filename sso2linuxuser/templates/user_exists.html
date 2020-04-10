@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>This user is registered allready</h2>
+
+<p>A user with your unique ID ({{ uname }}) is allready registered. Try to login at the workstation. 
+Please contact the administrator if you have not registered yourself.</p>
+
+<a href="{{ reverse_url("login_sso") }}" class="btn btn-primary">Register</a>
+
+<a href="{{ remote_login }}" class="btn btn-info">Login JupyterHub</a>
+
+{% end %}

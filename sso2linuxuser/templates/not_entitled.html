@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>You are not entitled to use this service...</h2>
+
+<p>Only students of the physics department can register...</p>
+
+<a href="{{ reverse_url("login_sso") }}" class="btn btn-primary">Register</a>
+
+<a href="{{ remote_login }}" class="btn btn-info">Login JupyterHub</a>
+
+{% end %}

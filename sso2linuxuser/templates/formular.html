@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Password for user {{ current_user }}</h2>
+
+<p>We need a new password for your account. Please follow these password rules:</p>
+<ol>
+<li>You need to use at least one lower case character (a-z)</li>
+<li>You need to use at least one upper case character (A-Z)</li>
+<li>You need to use at least one digit (0-9)</li>
+<li>You need to use at least one of these special characters: {{ special_chars }}</li>
+<li>Your password must be {{ min_chars }} - {{ max_chars }} long</li>
+</ol>
+<p>Please remember your password !!! You could use a password safe (e.g. <a href="https://keepass.info/">KeePass</a>)...</p>
+
+<form action="{{ reverse_url("create") }}" method="post">
+  {% module xsrf_form_html() %}
+  <label for="pw1">Password:
+    <input type="password" name="pw1"/>
+  </label>
+  <label for="pw2">Retype password: 
+    <input type="password" name="pw2"/>
+  </label>
+  <input type="submit" value="Register"/>
+</form>
+
+{% end %}

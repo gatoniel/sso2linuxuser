@@ -5,11 +5,17 @@ Created on Thu Apr  9 17:20:43 2020
 @author: niklas
 """
 
+import re
 import os
+import pwd
 import secrets
 import argparse
 import logging
-from logging.handlers import SysLogHandler
+from logging.handlers import SysLogHandle
+from subprocess import Popen, PIPE
+from multiprocessing import Process, Pipe
+
+import pamela
 
 import tornado.ioloop
 import tornado.web
@@ -24,8 +30,10 @@ session = {}
 
 class Application(tornado.web.Application):
     def __init__(
-            self, cookie_secret, saml_path, logger, debug=False, base_url="/",
-            https_reverse_proxy=True
+            self, cookie_secret, saml_path, logger, debug=False,
+            base_url="/shibboleth",
+            https_reverse_proxy=True,
+            remote_login="/jupyterhub"
             ):
         BASE_DIR = os.path.dirname(__file__)
         TEMPLATE_PATH = os.path.join(BASE_DIR, 'templates')
@@ -35,10 +43,11 @@ class Application(tornado.web.Application):
         handlers_tmp = [
             (r"/", IndexHandler, "index"),
             (login_url, SSOHandler, "login_sso"),
-            (r"/attrs", AttrsHandler, "attrs"),
             (r"/acs", ACSHandler, "acs"),
-#            (r"/create", CreateHandler, config),
+            (r"/formular", FormularHandler, "formular"),
+            (r"/create", CreateHandler, "create"),
             (r"/metadata", MetadataHandler, "saml_metadata"),
+            (r"/logout", LogoutHandler, "logout"),
         ]
         handlers = [
                 url(base_url+x0, x1, name=x2) for (x0,x1,x2) in handlers_tmp
@@ -47,23 +56,37 @@ class Application(tornado.web.Application):
             "template_path": TEMPLATE_PATH,
             "autorealod": True,
             "debug": debug,
-#            "xsrf_cookies": True,
+            "xsrf_cookies": True,
             "login_url": base_url+login_url,
             
             # our own settings come here
             "logger": logger,
             "saml_path": saml_path,
-            "https_reverse_proxy": https_reverse_proxy
+            "https_reverse_proxy": https_reverse_proxy,
+            "remote_login": remote_login
         }
         tornado.web.Application.__init__(self, handlers, **settings)
         logger.info("created Application")
 
 class BaseHandler(tornado.web.RequestHandler):
-    def initialize(self, logger, saml_path, https_reverse_proxy):
+    def initialize(self):
         self.log = self.application.settings.get('logger')
         self.saml_path = self.application.settings.get('saml_path')
         self.https_reverse_proxy = self.application.settings.get('https_reverse_proxy')
+        self.remote_login = self.application.settings.get('remote_login')
         
+        self.special_chars = "@!%*#?§+"
+        self.pw_min = 8
+        self.pw_max = 20
+        self.reg = "^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[{}])[A-Za-z0-9{}]{}$".format(
+                self.special_chars, self.special_chars,
+                "{"+str(self.pw_min)+","+str(self.pw_max)+"}"
+                )
+        
+    def get_current_user(self):
+        return self.get_secure_cookie("uid", max_age_days=1)
+    
+class SAMLHandler(BaseHandler):
     def prepare(self):
         request = self.request
         dataDict = {}
@@ -80,148 +103,125 @@ class BaseHandler(tornado.web.RequestHandler):
             'post_data': dataDict,
             'query_string': request.query
         }
-        
-    def get_current_user(self):
-        pass
     
     def init_saml_auth(self):
         self.auth = OneLogin_Saml2_Auth(
                 self.saml_req, custom_base_path=self.saml_path
                 )
         return self.auth
+    
+class FormularHandler(BaseHandler):
+    @tornado.web.authenticated
+    def get(self):
+        errors = None
+        if "error" in self.request.arguments:
+            errors = ["Please follow the password rules and type in the same password twice."]
+        self.render(
+                "formular.html", errors=errors,
+                special_chars=self.special_chars,
+                min_chars=self.pw_min, max_chars=self.pw_max
+                )
+    
+class CreateHandler(BaseHandler):
+    @tornado.web.authenticated
+    def post(self):
+        pw1 = self.request.arguments["pw1"]
+        pw2 = self.request.arguments["pw2"]
+        
+        # compiling regex 
+        pat = re.compile(self.reg)
+        if pw1 != pw2 or not re.search(pat, pw1):
+            self.redirect(self.reverse_url("formular")+"?error")
+            
+        uname = self.get_secure_cookie("uid", max_age_days=1)
+        # create new user
+        proc = Popen(
+                ["adduser", uname], stdout=PIPE, stderr=PIPE,
+                preexec_fn=preexec_fn
+                )
+        out, err = proc.communicate()
+        if err != "":
+            self.log.error("adduser %s: %s", uname, err)
+            self.set_status(500)
+            self.write("Internal Server Error - Errorcode 500")
+        else:
+            self.log.info("adduser %s was succesfull", uname)
+            
+            parent_conn, child_conn = Pipe()
+            p = Process(target=set_pwd, args=(uname, pw1, child_conn,))
+            p.start()
+            retval = parent_conn.recv()
+            p.join()
+            if retval == 0:
+                self.log.info("set pwd for %s was succesfull", uname)
+                self.render("success.html", remote_login=self.remote_login)
+            else:
+                self.log.error("set pwd for %s PAMError %s", uname, retval)
+                self.set_status(500)
+                self.write("Internal Server Error - Errorcode 500")
+            
 
 class IndexHandler(BaseHandler):
+    def get(self):self.render('index.html', remote_login=self.remote_login)
+
+class ACSHandler(SAMLHandler):
+    # disable xsrf here...
+    def check_xsrf_cookie(self):
+        pass
+    
     def post(self):
         auth = self.init_saml_auth()
         error_reason = None
-        attributes = False
-        paint_logout = False
-        success_slo = False
-
         auth.process_response()
         errors = auth.get_errors()
-        not_auth_warn = not auth.is_authenticated()
 
         if len(errors) == 0:
-            session['samlUserdata'] = auth.get_attributes()
-            session['samlNameId'] = auth.get_nameid()
-            session['samlSessionIndex'] = auth.get_session_index()
-            self_url = OneLogin_Saml2_Utils.get_self_url(self.saml_req)
-            if 'RelayState' in self.request.arguments and self_url != self.request.arguments['RelayState'][0].decode('utf-8'):
-                return self.redirect(self.request.arguments['RelayState'][0].decode('utf-8'))
+            attributes = auth.get_attributes()
+            
+            # test if user has the correct attributes
+            if not "students" in attributes["urn:oid:1.3.6.1.4.1.5923.1.1.1.1"]:
+                self.log.info("user is not a student.")
+                self.render("not_entitled.html")
+            if not "Fb13" in attributes["urn:oid:1.3.6.1.4.1.8974.2.1.866"]:
+                self.log.info("user is not a physicist.")
+                self.render("not_entitled.html")
+                
+            uname = attributes["urn:oid:0.9.2342.19200300.100.1.1"]
+            user_exists = True
+            try:
+                entry = pwd.getpwnam(uname)
+            except KeyError:
+                user_exists = False
+            if user_exists:
+                self.log.info("user %s exists already.", uname)
+                self.render("user_exists.html", uname=uname)
+            else:
+                self.set_secure_cookie(
+                        "uid", uname,
+                        expires_days=1
+                        )
+                self.log.info("user %s authenticated.", uname)
+                self.redirect(self.reverse_url("formular"))
+            
         elif auth.get_settings().is_debug_active():
             error_reason = auth.get_last_error_reason()
 
-        if 'samlUserdata' in session:
-            paint_logout = True
-            if len(session['samlUserdata']) > 0:
-                attributes = session['samlUserdata'].items()
-
-        self.render('index.html', errors=errors, error_reason=error_reason, not_auth_warn=not_auth_warn, success_slo=success_slo, attributes=attributes, paint_logout=paint_logout)
-
-    def get(self):
-        req = self.saml_req
-        auth = self.init_saml_auth()
-        error_reason = None
-        errors = []
-        not_auth_warn = False
-        success_slo = False
-        attributes = False
-        paint_logout = False
-
-
-        if 'slo' in req['get_data']:
-            self.log.info('-slo-')
-            name_id = None
-            session_index = None
-            if 'samlNameId' in session:
-                name_id = session['samlNameId']
-            if 'samlSessionIndex' in session:
-                session_index = session['samlSessionIndex']
-            return self.redirect(auth.logout(name_id=name_id, session_index=session_index))
-        elif 'acs' in req['get_data']:
-            self.log.info('-acs-')
-            auth.process_response()
-            errors = auth.get_errors()
-            not_auth_warn = not auth.is_authenticated()
-            if len(errors) == 0:
-                session['samlUserdata'] = auth.get_attributes()
-                session['samlNameId'] = auth.get_nameid()
-                session['samlSessionIndex'] = auth.get_session_index()
-                self_url = OneLogin_Saml2_Utils.get_self_url(req)
-                if 'RelayState' in self.request.arguments and self_url != self.request.arguments['RelayState'][0].decode('utf-8'):
-                    return self.redirect(auth.redirect_to(self.request.arguments['RelayState'][0].decode('utf-8')))
-                elif auth.get_settings().is_debug_active():
-                    error_reason = auth.get_last_error_reason()
-        elif 'sls' in req['get_data']:
-            self.log.info('-sls-')
-            dscb = lambda: session.clear()  # clear out the session
-            url = auth.process_slo(delete_session_cb=dscb)
-            errors = auth.get_errors()
-            if len(errors) == 0:
-                if url is not None:
-                    return self.redirect(url)
-                else:
-                    success_slo = True
-            elif auth.get_settings().is_debug_active():
-                error_reason = auth.get_last_error_reason()
-        if 'samlUserdata' in session:
-            self.log.info('-samlUserdata-')
-            paint_logout = True
-            if len(session['samlUserdata']) > 0:
-                attributes = session['samlUserdata'].items()
-                self.log.info("ATTRIBUTES", attributes)
-        self.render('index.html', errors=errors, error_reason=error_reason, not_auth_warn=not_auth_warn, success_slo=success_slo, attributes=attributes, paint_logout=paint_logout)
-
-class ACSHandler(BaseHandler):
-    def post(self):
-        auth = self.init_saml_auth()
-        error_reason = None
-        attributes = False
-        paint_logout = False
-        success_slo = False
-
-        auth.process_response()
-        errors = auth.get_errors()
-        not_auth_warn = not auth.is_authenticated()
-
-        if len(errors) == 0:
-            session['samlUserdata'] = auth.get_attributes()
-            session['samlNameId'] = auth.get_nameid()
-            session['samlSessionIndex'] = auth.get_session_index()
-            self_url = OneLogin_Saml2_Utils.get_self_url(self.saml_req)
-            if 'RelayState' in self.request.arguments and self_url != self.request.arguments['RelayState'][0].decode('utf-8'):
-                return self.redirect(self.request.arguments['RelayState'][0].decode('utf-8'))
-        elif auth.get_settings().is_debug_active():
-            error_reason = auth.get_last_error_reason()
-
-        if 'samlUserdata' in session:
-            paint_logout = True
-            if len(session['samlUserdata']) > 0:
-                attributes = session['samlUserdata'].items()
-
-        self.render('index.html', errors=errors, error_reason=error_reason, not_auth_warn=not_auth_warn, success_slo=success_slo, attributes=attributes, paint_logout=paint_logout)
-
-class SSOHandler(BaseHandler):
+        self.render(
+                'index.html', errors=errors, error_reason=error_reason,
+                remote_login=self.remote_login
+                )
+        
+class SSOHandler(SAMLHandler):
     def get(self):
         self.init_saml_auth()
-        self.log.info('-sso-')
-        return self.redirect(self.auth.login(self.reverse_url("attrs")))
-
-class AttrsHandler(BaseHandler):
+        return self.redirect(self.auth.login(self.reverse_url("formular")))
+    
+class LogoutHandler(BaseHandler):
     def get(self):
-        paint_logout = False
-        attributes = False
+        self.clear_all_cookies()
+        self.redirect(self.reverse_url("index"))
 
-        if 'samlUserdata' in session:
-            paint_logout = True
-            if len(session['samlUserdata']) > 0:
-                attributes = session['samlUserdata'].items()
-
-        self.render('attrs.html', paint_logout=paint_logout, attributes=attributes)
-
-
-class MetadataHandler(BaseHandler):
+class MetadataHandler(SAMLHandler):
     def get(self):
         auth = self.init_saml_auth()
         saml_settings = auth.get_settings()
@@ -233,9 +233,23 @@ class MetadataHandler(BaseHandler):
             self.set_header('Content-Type', 'text/xml')
             self.write(metadata)
         else:
-            # resp = HttpResponseServerError(content=', '.join(errors))
-            self.write(', '.join(errors))
-        # return resp
+            self.log.error(', '.join(errors))
+            self.set_status(500)
+            self.write("Internal Server Error - Errorcode 500")
+
+def preexec_fn():
+    """Set the subprocess to root user"""
+    os.setuid(0)
+    os.getuid(0)
+    
+def set_pwd(username, password, conn):
+    """Change to root"""
+    os.setuid(0)
+    os.getuid(0)
+    retval = pamela.change_password(
+            username, password, service="login", encoding='utf-8'
+            )
+    conn.send(retval)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -249,7 +263,11 @@ def main():
             )
     parser.add_argument(
             "--base_url", help="base", type=str,
-            default=r"/"
+            default=r"/shibboleth"
+            )
+    parser.add_argument(
+            "--remote_login", help="base", type=str,
+            default=r"/jupyterhub"
             )
     parser.add_argument(
             "--port", help="base", type=int,
@@ -285,6 +303,16 @@ def main():
     h.setLevel(loglevel)
     logger.addHandler(h)
     
+    h2 = SysLogHandler(address=args.syslog_address, facility="daemon")
+    formatter = logging.Formatter(
+            '[%(name)s-%(levelname)s tornado] %(message)s'
+            )
+    h2.setFormatter(formatter)
+    h2.setLevel(loglevel)
+    logging.getLogger("tornado.access").addHandler(h2)
+    logging.getLogger("tornado.application").addHandler(h2)
+    logging.getLogger("tornado.general").addHandler(h2)
+    
     # create cookie secret
     cookie_secret = secrets.token_hex(args.secret_nbytes)
     
@@ -292,7 +320,8 @@ def main():
             cookie_secret=cookie_secret, saml_path=args.saml_path,
             logger=logger, debug=debug,
             base_url=args.base_url,
-            https_reverse_proxy=args.https_reverse_proxy
+            https_reverse_proxy=args.https_reverse_proxy,
+            remote_login=args.remote_login
             )
     http_server = tornado.httpserver.HTTPServer(app)
     http_server.listen(port)

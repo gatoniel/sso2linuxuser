@@ -5,7 +5,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <title>A Python SAML Toolkit by OneLogin demo</title>
+    <title>Registration at Remote Workstation Picard</title>
 
     <link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
 
@@ -18,7 +18,29 @@
   </head>
   <body>
     <div class="container">
-      <h1>A Python SAML Toolkit by OneLogin demo</h1>
+      <h1>Registration at Remote Workstation Picard</h1>
+      <div class="alert alert-success" role="alert">
+      {% if current_user %}
+      You are authenticated.<br />
+      <a href="{{ reverse_url("logout") }}" class="btn btn-primary">Logout</a>
+      {% elif %}
+      You are **not** authenticated.
+      {% end %}
+      </div>
+      
+      {% if errors %}
+  <div class="alert alert-danger" role="alert">
+    <strong>Errors:</strong>
+    <ul class="list-unstyled">
+        {% for err in errors %}
+          <li>{{err}}</li>
+        {% end %}
+        {% if error_reason %}
+          <span>{{error_reason}}</span>
+        {% end %}
+    </ul>
+  </div>
+{% end %}
 
       {% block content %}{% end %}
     </div>

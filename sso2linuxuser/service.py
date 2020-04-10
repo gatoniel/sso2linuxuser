@@ -33,18 +33,23 @@ class Application(tornado.web.Application):
                 "logger": logger, "saml_path": saml_path,
                 }
         
-        handlers = [
-            (base_url, IndexHandler, config),
+        handlers_tmp = [
+            (r"/", IndexHandler, config),
+            (r"/sso", SSOHandler, config, "login_sso"),
             (r"/attrs", AttrsHandler, config),
+            (r"/acs", ACSHandler, config),
 #            (r"/create", CreateHandler, config),
-            (base_url+r"metadata", MetadataHandler, config),
+            (r"/metadata", MetadataHandler, config),
         ]
+        handlers = [
+                (base_url+x0, x1, x2) for (x0,x1,x2) in handlers_tmp
+                ]        
         settings = {
             "template_path": TEMPLATE_PATH,
             "autorealod": True,
             "debug": debug,
-            "xsrf_cookies": True,
-            "login_url": base_url
+#            "xsrf_cookies": True,
+            "login_url": self.reverse_url("login_sso")
         }
         tornado.web.Application.__init__(self, handlers, **settings)
         logger.info("created Application")
@@ -64,6 +69,7 @@ class BaseHandler(tornado.web.RequestHandler):
         self.auth = OneLogin_Saml2_Auth(
                 self.saml_req, custom_base_path=self.saml_path
                 )
+        return self.auth
 
 class IndexHandler(BaseHandler):
     def post(self):
@@ -104,14 +110,8 @@ class IndexHandler(BaseHandler):
         attributes = False
         paint_logout = False
 
-        if 'sso' in req['get_data']:
-            self.log.info('-sso-')
-            return self.redirect(auth.login())
-        elif 'sso2' in req['get_data']:
-            self.log.info('-sso2-')
-            return_to = '%s/attrs' % self.request.host
-            return self.redirect(auth.login(return_to))
-        elif 'slo' in req['get_data']:
+
+        if 'slo' in req['get_data']:
             self.log.info('-slo-')
             name_id = None
             session_index = None
@@ -154,6 +154,40 @@ class IndexHandler(BaseHandler):
                 self.log.info("ATTRIBUTES", attributes)
         self.render('index.html', errors=errors, error_reason=error_reason, not_auth_warn=not_auth_warn, success_slo=success_slo, attributes=attributes, paint_logout=paint_logout)
 
+class ACSHandler(BaseHandler):
+    def post(self):
+        auth = self.init_saml_auth()
+        error_reason = None
+        attributes = False
+        paint_logout = False
+        success_slo = False
+
+        auth.process_response()
+        errors = auth.get_errors()
+        not_auth_warn = not auth.is_authenticated()
+
+        if len(errors) == 0:
+            session['samlUserdata'] = auth.get_attributes()
+            session['samlNameId'] = auth.get_nameid()
+            session['samlSessionIndex'] = auth.get_session_index()
+            self_url = OneLogin_Saml2_Utils.get_self_url(self.saml_req)
+            if 'RelayState' in self.request.arguments and self_url != self.request.arguments['RelayState'][0].decode('utf-8'):
+                return self.redirect(self.request.arguments['RelayState'][0].decode('utf-8'))
+        elif auth.get_settings().is_debug_active():
+            error_reason = auth.get_last_error_reason()
+
+        if 'samlUserdata' in session:
+            paint_logout = True
+            if len(session['samlUserdata']) > 0:
+                attributes = session['samlUserdata'].items()
+
+        self.render('index.html', errors=errors, error_reason=error_reason, not_auth_warn=not_auth_warn, success_slo=success_slo, attributes=attributes, paint_logout=paint_logout)
+
+class SSOHandler(BaseHandler):
+    def get(self):
+        self.init_saml_auth()
+        self.log.info('-sso-')
+        return self.redirect(self.auth.login())
 
 class AttrsHandler(BaseHandler):
     def get(self):

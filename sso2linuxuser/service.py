@@ -34,22 +34,22 @@ class Application(tornado.web.Application):
                 }
         
         handlers_tmp = [
-            (r"/", IndexHandler, config),
-            (r"/sso", SSOHandler, config),
-            (r"/attrs", AttrsHandler, config),
-            (r"/acs", ACSHandler, config),
+            (r"/", IndexHandler, config, "index"),
+            (r"/sso", SSOHandler, config, "login_sso"),
+            (r"/attrs", AttrsHandler, config, "attrs"),
+            (r"/acs", ACSHandler, config, "acs"),
 #            (r"/create", CreateHandler, config),
-            (r"/metadata", MetadataHandler, config),
+            (r"/metadata", MetadataHandler, config, "saml_metadata"),
         ]
         handlers = [
-                (base_url+x0, x1, x2) for (x0,x1,x2) in handlers_tmp
+                (base_url+x0, x1, x2, x3) for (x0,x1,x2,x3) in handlers_tmp
                 ]        
         settings = {
             "template_path": TEMPLATE_PATH,
             "autorealod": True,
             "debug": debug,
 #            "xsrf_cookies": True,
-            "login_url": base_url+r"/sso",
+            "login_url": self.reverse_url("login_sso"),
         }
         tornado.web.Application.__init__(self, handlers, **settings)
         logger.info("created Application")
@@ -187,7 +187,7 @@ class SSOHandler(BaseHandler):
     def get(self):
         self.init_saml_auth()
         self.log.info('-sso-')
-        return self.redirect(self.auth.login())
+        return self.redirect(self.auth.login(self.reverse_url("attrs")))
 
 class AttrsHandler(BaseHandler):
     def get(self):

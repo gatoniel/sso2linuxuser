@@ -15,6 +15,7 @@ import tornado.ioloop
 import tornado.web
 import tornado.httpserver
 import tornado.httputil
+import tornado.web.url as url
 
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.utils import OneLogin_Saml2_Utils
@@ -44,7 +45,7 @@ class Application(tornado.web.Application):
             (r"/metadata", MetadataHandler, config, "saml_metadata"),
         ]
         handlers = [
-                (base_url+x0, x1, x2, x3) for (x0,x1,x2,x3) in handlers_tmp
+                url(base_url+x0, x1, x2, name=x3) for (x0,x1,x2,x3) in handlers_tmp
                 ]        
         settings = {
             "template_path": TEMPLATE_PATH,

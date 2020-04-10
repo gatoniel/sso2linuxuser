@@ -35,7 +35,7 @@ class Application(tornado.web.Application):
         
         handlers_tmp = [
             (r"/", IndexHandler, config),
-            (r"/sso", SSOHandler, config, "login_sso"),
+            (r"/sso", SSOHandler, config),
             (r"/attrs", AttrsHandler, config),
             (r"/acs", ACSHandler, config),
 #            (r"/create", CreateHandler, config),
@@ -49,7 +49,7 @@ class Application(tornado.web.Application):
             "autorealod": True,
             "debug": debug,
 #            "xsrf_cookies": True,
-            "login_url": self.reverse_url("login_sso")
+            "login_url": base_url+r"/sso",
         }
         tornado.web.Application.__init__(self, handlers, **settings)
         logger.info("created Application")

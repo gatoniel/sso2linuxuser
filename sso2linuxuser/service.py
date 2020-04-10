@@ -15,7 +15,7 @@ import tornado.ioloop
 import tornado.web
 import tornado.httpserver
 import tornado.httputil
-import tornado.web.url as url
+from tornado.web import url
 
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.utils import OneLogin_Saml2_Utils
@@ -31,37 +31,38 @@ class Application(tornado.web.Application):
         TEMPLATE_PATH = os.path.join(BASE_DIR, 'templates')
         logger.debug("TEMPLATE PATH: %s", TEMPLATE_PATH)
         
-        config = {
-                "logger": logger, "saml_path": saml_path,
-                "https_reverse_proxy": https_reverse_proxy
-                }
-        
+        login_url = r"/sso"
         handlers_tmp = [
-            (r"/", IndexHandler, config, "index"),
-            (r"/sso", SSOHandler, config, "login_sso"),
-            (r"/attrs", AttrsHandler, config, "attrs"),
-            (r"/acs", ACSHandler, config, "acs"),
+            (r"/", IndexHandler, "index"),
+            (login_url, SSOHandler, "login_sso"),
+            (r"/attrs", AttrsHandler, "attrs"),
+            (r"/acs", ACSHandler, "acs"),
 #            (r"/create", CreateHandler, config),
-            (r"/metadata", MetadataHandler, config, "saml_metadata"),
+            (r"/metadata", MetadataHandler, "saml_metadata"),
         ]
         handlers = [
-                url(base_url+x0, x1, x2, name=x3) for (x0,x1,x2,x3) in handlers_tmp
+                url(base_url+x0, x1, name=x2) for (x0,x1,x2) in handlers_tmp
                 ]        
         settings = {
             "template_path": TEMPLATE_PATH,
             "autorealod": True,
             "debug": debug,
 #            "xsrf_cookies": True,
-            "login_url": self.reverse_url("login_sso"),
+            "login_url": base_url+login_url,
+            
+            # our own settings come here
+            "logger": logger,
+            "saml_path": saml_path,
+            "https_reverse_proxy": https_reverse_proxy
         }
         tornado.web.Application.__init__(self, handlers, **settings)
         logger.info("created Application")
 
 class BaseHandler(tornado.web.RequestHandler):
     def initialize(self, logger, saml_path, https_reverse_proxy):
-        self.log = logger
-        self.saml_path = saml_path
-        self.https_reverse_proxy = https_reverse_proxy
+        self.log = self.application.settings.get('logger')
+        self.saml_path = self.application.settings.get('saml_path')
+        self.https_reverse_proxy = self.application.settings.get('https_reverse_proxy')
         
     def prepare(self):
         request = self.request

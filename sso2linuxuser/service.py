@@ -30,7 +30,8 @@ session = {}
 
 class Application(tornado.web.Application):
     def __init__(
-            self, cookie_secret, saml_path, logger, debug=False,
+            self, cookie_secret, saml_path, logger, data_url, usage_url,
+            debug=False,
             base_url="/shibboleth",
             https_reverse_proxy=True,
             remote_login="/jupyterhub"
@@ -64,7 +65,9 @@ class Application(tornado.web.Application):
             "logger": logger,
             "saml_path": saml_path,
             "https_reverse_proxy": https_reverse_proxy,
-            "remote_login": remote_login
+            "remote_login": remote_login,
+            "data_url": data_url,
+            "usage_url": usage_url
         }
         tornado.web.Application.__init__(self, handlers, **settings)
         logger.info("created Application")
@@ -75,6 +78,8 @@ class BaseHandler(tornado.web.RequestHandler):
         self.saml_path = self.application.settings.get('saml_path')
         self.https_reverse_proxy = self.application.settings.get('https_reverse_proxy')
         self.remote_login = self.application.settings.get('remote_login')
+        self.data_url = self.application.settings.get('data_url')
+        self.usage_url = self.application.settings.get('usage_url')
         
         self.special_chars = "@!%*#?§+"
         self.pw_min = 8
@@ -116,11 +121,12 @@ class FormularHandler(BaseHandler):
     def get(self):
         errors = None
         if "error" in self.request.arguments:
-            errors = ["Please follow the password rules and type in the same password twice."]
+            errors = ["Please follow the password rules and type in the same password twice. Do not forget to check the data protection declaration and terms of service."]
         self.render(
                 "formular.html", errors=errors,
                 special_chars=self.special_chars,
-                min_chars=self.pw_min, max_chars=self.pw_max
+                min_chars=self.pw_min, max_chars=self.pw_max,
+                data_url=self.data_url, usage_url=self.usage_url
                 )
     
 class CreateHandler(BaseHandler):
@@ -274,6 +280,14 @@ def main():
             default=r"/jupyterhub"
             )
     parser.add_argument(
+            "--data_url", help="base", type=str,
+            default=r"/datenschutz"
+            )
+    parser.add_argument(
+            "--usage_url", help="base", type=str,
+            default=r"/nutzungsbedingungen"
+            )
+    parser.add_argument(
             "--port", help="base", type=int,
             default=8002
             )
@@ -325,7 +339,9 @@ def main():
             logger=logger, debug=debug,
             base_url=args.base_url,
             https_reverse_proxy=args.https_reverse_proxy,
-            remote_login=args.remote_login
+            remote_login=args.remote_login,
+            data_url=args.data_url,
+            usage_url=args.usage_url
             )
     http_server = tornado.httpserver.HTTPServer(app)
     http_server.listen(port)

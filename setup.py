@@ -13,7 +13,7 @@ with open('requirements.txt') as f:
 
 setuptools.setup(
     name="sso2linuxuser", # Replace with your own username
-    version="0.0.9-dev",
+    version="0.0.10-dev",
     author="Niklas Netter",
     author_email="niknett@gmail.com",
     description="Use SSO to create a linux user on server",

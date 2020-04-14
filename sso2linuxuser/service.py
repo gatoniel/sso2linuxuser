@@ -58,6 +58,7 @@ class Application(tornado.web.Application):
             "debug": debug,
             "xsrf_cookies": True,
             "login_url": base_url+login_url,
+            "cookie_secret": cookie_secret,
             
             # our own settings come here
             "logger": logger,

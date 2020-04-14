@@ -23,7 +23,7 @@
       {% if current_user %}
       You are authenticated.<br />
       <a href="{{ reverse_url("logout") }}" class="btn btn-primary">Logout</a>
-      {% elif %}
+      {% else %}
       You are **not** authenticated.
       {% end %}
       </div>

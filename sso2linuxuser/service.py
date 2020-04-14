@@ -134,10 +134,11 @@ class CreateHandler(BaseHandler):
     def post(self):
         pw1 = self.request.arguments["pw1"]
         pw2 = self.request.arguments["pw2"]
+        checked = self.request.arguments["checks"] == "checked"
         
         # compiling regex 
         pat = re.compile(self.reg)
-        if pw1 != pw2 or not re.search(pat, pw1):
+        if pw1 != pw2 or not re.search(pat, pw1) or not checked:
             self.redirect(self.reverse_url("formular")+"?error")
             
         uname = self.get_secure_cookie("uid", max_age_days=1)

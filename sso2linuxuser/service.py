@@ -163,7 +163,10 @@ class CreateHandler(BaseHandler):
             
 
 class IndexHandler(BaseHandler):
-    def get(self):self.render('index.html', remote_login=self.remote_login)
+    def get(self):self.render(
+            'index.html', errors=None, error_reason=None,
+            remote_login=self.remote_login
+            )
 
 class ACSHandler(SAMLHandler):
     # disable xsrf here...
@@ -182,10 +185,10 @@ class ACSHandler(SAMLHandler):
             # test if user has the correct attributes
             if not "students" in attributes["urn:oid:1.3.6.1.4.1.5923.1.1.1.1"]:
                 self.log.info("user is not a student.")
-                self.render("not_entitled.html")
+                self.render("not_entitled.html",  errors=None, error_reason=None)
             if not "Fb13" in attributes["urn:oid:1.3.6.1.4.1.8974.2.1.866"]:
                 self.log.info("user is not a physicist.")
-                self.render("not_entitled.html")
+                self.render("not_entitled.html", errors=None, error_reason=None)
                 
             uname = attributes["urn:oid:0.9.2342.19200300.100.1.1"]
             user_exists = True
@@ -195,7 +198,7 @@ class ACSHandler(SAMLHandler):
                 user_exists = False
             if user_exists:
                 self.log.info("user %s exists already.", uname)
-                self.render("user_exists.html", uname=uname)
+                self.render("user_exists.html", uname=uname,  errors=None, error_reason=None)
             else:
                 self.set_secure_cookie(
                         "uid", uname,

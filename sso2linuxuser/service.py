@@ -11,7 +11,7 @@ import pwd
 import secrets
 import argparse
 import logging
-from logging.handlers import SysLogHandle
+from logging.handlers import SysLogHandler
 from subprocess import Popen, PIPE
 from multiprocessing import Process, Pipe
 

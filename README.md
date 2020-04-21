@@ -58,3 +58,7 @@ I am aware, that this service poses security threats to the server. Thus I will 
 ## known issues
 - The logging with debug does not work correctly.
 - SingleLogoutService is not implemented, but is not really needed...
+- When the IdP certificate relies on a CA there is a error message: 
+  
+  > msg=unable to get local issuer certificate
+

@@ -18,14 +18,14 @@
   {% module xsrf_form_html() %}
   <label for="pw1">Password:
     <input type="password" name="pw1"/>
-  </label>
+  </label><br />
   <label for="pw2">Retype password: 
     <input type="password" name="pw2"/>
-  </label>
-  <label for="checks">I have read the <a href="{{ data_url }}">data protection regulations</a> 
-  and the <a href="{{ usage_url }}">terms of service</a>
+  </label><br />
+  <label for="checks">I have read the <a href="{{ data_url }}">data protection regulations</a>
+  and the <a href="{{ usage_url }}">terms of service</a>: 
     <input type="checkbox" name="checks" value="checked">
-  </label>
+  </label><br />
   <input type="submit" value="Register"/>
 </form>
 

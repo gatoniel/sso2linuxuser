@@ -7,6 +7,7 @@ Created on Thu Apr  9 17:20:43 2020
 
 import re
 import os
+import sys
 import pwd
 import secrets
 import argparse
@@ -21,7 +22,7 @@ import tornado.ioloop
 import tornado.web
 import tornado.httpserver
 import tornado.httputil
-from tornado.web import url
+from tornado.web import url, MissingArgumentError
 
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.utils import OneLogin_Saml2_Utils
@@ -34,12 +35,13 @@ class Application(tornado.web.Application):
             debug=False,
             base_url="/shibboleth",
             https_reverse_proxy=True,
-            remote_login="/jupyterhub"
+            remote_login="/jupyterhub",
+            lowercase_uname=True,
             ):
         BASE_DIR = os.path.dirname(__file__)
         TEMPLATE_PATH = os.path.join(BASE_DIR, 'templates')
         logger.debug("TEMPLATE PATH: %s", TEMPLATE_PATH)
-        
+
         login_url = r"/sso"
         handlers_tmp = [
             (r"/", IndexHandler, "index"),
@@ -52,7 +54,7 @@ class Application(tornado.web.Application):
         ]
         handlers = [
                 url(base_url+x0, x1, name=x2) for (x0,x1,x2) in handlers_tmp
-                ]        
+                ]
         settings = {
             "template_path": TEMPLATE_PATH,
             "autorealod": True,
@@ -60,14 +62,15 @@ class Application(tornado.web.Application):
             "xsrf_cookies": True,
             "login_url": base_url+login_url,
             "cookie_secret": cookie_secret,
-            
+
             # our own settings come here
             "logger": logger,
             "saml_path": saml_path,
             "https_reverse_proxy": https_reverse_proxy,
             "remote_login": remote_login,
             "data_url": data_url,
-            "usage_url": usage_url
+            "usage_url": usage_url,
+            "lowercase_uname": lowercase_uname
         }
         tornado.web.Application.__init__(self, handlers, **settings)
         logger.info("created Application")
@@ -80,6 +83,7 @@ class BaseHandler(tornado.web.RequestHandler):
         self.remote_login = self.application.settings.get('remote_login')
         self.data_url = self.application.settings.get('data_url')
         self.usage_url = self.application.settings.get('usage_url')
+        self.lowercase_uname = self.application.settings.get('lowercase_uname')
         
         self.special_chars = "@!%*#?§+"
         self.pw_min = 8
@@ -121,9 +125,13 @@ class FormularHandler(BaseHandler):
     def get(self):
         errors = None
         if "error" in self.request.arguments:
-            errors = ["Please follow the password rules and type in the same password twice. Do not forget to check the data protection declaration and terms of service."]
+            errors = [
+                    """Please follow the password rules and type in the same 
+                    password twice. Do not forget to check the data protection 
+                    declaration and terms of service."""
+                    ]
         self.render(
-                "formular.html", errors=errors,
+                "formular.html", errors=errors, error_reason=None,
                 special_chars=self.special_chars,
                 min_chars=self.pw_min, max_chars=self.pw_max,
                 data_url=self.data_url, usage_url=self.usage_url
@@ -132,45 +140,58 @@ class FormularHandler(BaseHandler):
 class CreateHandler(BaseHandler):
     @tornado.web.authenticated
     def post(self):
-        pw1 = self.request.arguments["pw1"]
-        pw2 = self.request.arguments["pw2"]
-        checked = self.request.arguments["checks"] == "checked"
-        
-        # compiling regex 
+        error_args = False
+        try:
+            pw1 = self.get_argument("pw1")
+            pw2 = self.get_argument("pw2")
+            checked = self.get_argument("checks", "notcheck") == "checked"
+        except MissingArgumentError:
+            error_args = True
+
+        # compiling regex
         pat = re.compile(self.reg)
-        if pw1 != pw2 or not re.search(pat, pw1) or not checked:
+        if pw1 != pw2 or not re.search(pat, pw1) or not checked or error_args:
             self.redirect(self.reverse_url("formular")+"?error")
-            
-        uname = self.get_secure_cookie("uid", max_age_days=1)
-        # create new user
-        proc = Popen(
-                ["adduser", uname], stdout=PIPE, stderr=PIPE,
-                preexec_fn=preexec_fn
-                )
-        out, err = proc.communicate()
-        if err != "":
-            self.log.error("adduser %s: %s", uname, err)
-            self.set_status(500)
-            self.write("Internal Server Error - Errorcode 500")
         else:
-            self.log.info("adduser %s was succesfull", uname)
-            
-            parent_conn, child_conn = Pipe()
-            p = Process(target=set_pwd, args=(uname, pw1, child_conn,))
-            p.start()
-            retval = parent_conn.recv()
-            p.join()
-            if retval == 0:
-                self.log.info("set pwd for %s was succesfull", uname)
-                self.render("success.html", remote_login=self.remote_login)
-            else:
-                self.log.error("set pwd for %s PAMError %s", uname, retval)
+
+            uname = self.get_secure_cookie("uid", max_age_days=1)
+            # create new user
+            self.log.debug(str(os.getuid()))
+            proc = Popen(
+                    ["adduser", uname], stdout=PIPE, stderr=PIPE,
+                    preexec_fn=preexec_fn, encoding=sys.getdefaultencoding()
+                    )
+            out, err = proc.communicate()
+            self.log.debug("out: %s", out)
+            self.log.debug("err: %s", err)
+            if err != "":
+                self.log.error("adduser %s: %s", uname, err)
                 self.set_status(500)
                 self.write("Internal Server Error - Errorcode 500")
+            else:
+                self.log.info("adduser %s was succesfull", uname)
+
+                parent_conn, child_conn = Pipe()
+                p = Process(target=set_pwd, args=(uname, pw1, child_conn,))
+                p.start()
+                retval = parent_conn.recv()
+                self.log.debug("retval %s", retval)
+                p.join()
+                if retval == "":
+                    self.log.info("set pwd for %s was succesfull", uname)
+                    self.render(
+                            "success.html", remote_login=self.remote_login,
+                            errors=None
+                            )
+                else:
+                    self.log.error("set pwd for %s: %s", uname, retval)
+                    self.set_status(500)
+                    self.write("Internal Server Error - Errorcode 500")
             
 
 class IndexHandler(BaseHandler):
-    def get(self):self.render(
+    def get(self):
+        self.render(
             'index.html', errors=None, error_reason=None,
             remote_login=self.remote_login
             )
@@ -179,7 +200,7 @@ class ACSHandler(SAMLHandler):
     # disable xsrf here...
     def check_xsrf_cookie(self):
         pass
-    
+
     def post(self):
         auth = self.init_saml_auth()
         error_reason = None
@@ -188,16 +209,26 @@ class ACSHandler(SAMLHandler):
 
         if len(errors) == 0:
             attributes = auth.get_attributes()
-            
+            self.log.debug("Attributes: %s", attributes)
             # test if user has the correct attributes
-            if not "students" in attributes["urn:oid:1.3.6.1.4.1.5923.1.1.1.1"]:
+            if not "student" in attributes["urn:oid:1.3.6.1.4.1.5923.1.1.1.1"]:
                 self.log.info("user is not a student.")
-                self.render("not_entitled.html",  errors=None, error_reason=None)
+                self.render(
+                        "not_entitled.html",  errors=None, error_reason=None,
+                        remote_login=self.remote_login
+                        )
+                return
             if not "Fb13" in attributes["urn:oid:1.3.6.1.4.1.8974.2.1.866"]:
                 self.log.info("user is not a physicist.")
-                self.render("not_entitled.html", errors=None, error_reason=None)
-                
-            uname = attributes["urn:oid:0.9.2342.19200300.100.1.1"]
+                self.render(
+                        "not_entitled.html",  errors=None, error_reason=None,
+                        remote_login=self.remote_login
+                        )
+                return
+
+            uname = attributes["urn:oid:0.9.2342.19200300.100.1.1"][0]
+            if self.lowercase_uname:
+                uname = uname.lower()
             user_exists = True
             try:
                 entry = pwd.getpwnam(uname)
@@ -205,7 +236,11 @@ class ACSHandler(SAMLHandler):
                 user_exists = False
             if user_exists:
                 self.log.info("user %s exists already.", uname)
-                self.render("user_exists.html", uname=uname,  errors=None, error_reason=None)
+                self.render(
+                        "user_exists.html", uname=uname,  errors=None,
+                        error_reason=None, remote_login=self.remote_login
+                        )
+                return
             else:
                 self.set_secure_cookie(
                         "uid", uname,
@@ -213,7 +248,8 @@ class ACSHandler(SAMLHandler):
                         )
                 self.log.info("user %s authenticated.", uname)
                 self.redirect(self.reverse_url("formular"))
-            
+                return
+
         elif auth.get_settings().is_debug_active():
             error_reason = auth.get_last_error_reason()
 
@@ -251,23 +287,28 @@ class MetadataHandler(SAMLHandler):
 def preexec_fn():
     """Set the subprocess to root user"""
     os.setuid(0)
-    os.getuid(0)
+    os.setgid(0)
     
 def set_pwd(username, password, conn):
     """Change to root"""
     os.setuid(0)
-    os.getuid(0)
-    retval = pamela.change_password(
-            username, password, service="login", encoding='utf-8'
-            )
-    conn.send(retval)
+    os.setgid(0)
+    error = ""
+    try:
+        pamela.change_password(
+                username, password, service="login", encoding='utf-8'
+                )
+    except pamela.PAMError as e:
+        error = str(e)
+    conn.send(error)
+    conn.close()
 
 def main():
     parser = argparse.ArgumentParser(
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
             description="""sso2linuxuser: create linux user after SSO"""
             )
-    
+
     parser.add_argument(
             "--saml_path", help="base", type=str,
             default="/opt/jupyterhub/etc/sso2linuxuser"
@@ -300,14 +341,17 @@ def main():
             "--debug", help="base", action="store_true"
             )
     parser.add_argument(
+            "--lowercase_uname", help="base", action="store_true"
+            )
+    parser.add_argument(
             "--https_reverse_proxy", help="base", action="store_true"
             )
     parser.add_argument(
             "--syslog_address", type=str,
             default='/dev/log'
             )
-    
-    args = parser.parse_args()    
+
+    args = parser.parse_args()
     port = args.port
     debug = args.debug
     
@@ -321,7 +365,7 @@ def main():
     h.setFormatter(formatter)
     h.setLevel(loglevel)
     logger.addHandler(h)
-    
+
     h2 = SysLogHandler(address=args.syslog_address, facility="daemon")
     formatter = logging.Formatter(
             '[%(name)s-%(levelname)s tornado] %(message)s'
@@ -331,10 +375,10 @@ def main():
     logging.getLogger("tornado.access").addHandler(h2)
     logging.getLogger("tornado.application").addHandler(h2)
     logging.getLogger("tornado.general").addHandler(h2)
-    
+
     # create cookie secret
     cookie_secret = secrets.token_hex(args.secret_nbytes)
-    
+
     app = Application(
             cookie_secret=cookie_secret, saml_path=args.saml_path,
             logger=logger, debug=debug,
@@ -342,11 +386,13 @@ def main():
             https_reverse_proxy=args.https_reverse_proxy,
             remote_login=args.remote_login,
             data_url=args.data_url,
-            usage_url=args.usage_url
+            usage_url=args.usage_url,
+            lowercase_uname=args.lowercase_uname
             )
     http_server = tornado.httpserver.HTTPServer(app)
     http_server.listen(port)
     logger.info("Listening on port %i", port)
+    logger.debug("Debugging")
     tornado.ioloop.IOLoop.instance().start()
     
 if __name__ == "__main__":
